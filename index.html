@@ -12,12 +12,20 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#172014}
 .stage{position:fixed;left:50%;top:50%;width:min(100vw,56.25vh);height:min(177.78vw,100vh);transform:translate(-50%,-50%);overflow:hidden;box-shadow:0 0 30px rgba(0,0,0,.28)}
 .photo{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
 .number{position:absolute;left:64.0%;top:33.55%;transform:translate(-50%,-50%);color:#050505;font-family:"Arial Narrow","Helvetica Neue Condensed",Arial,Helvetica,sans-serif;font-size:calc(min(100vw,56.25vh)*.073);font-weight:850;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums;white-space:nowrap}
-.player{position:absolute;z-index:6;bottom:2%;left:2%;right:2%;padding:8px 10px;border-radius:14px;background:rgba(16,22,22,.64);color:white;font:13px -apple-system,BlinkMacSystemFont,Arial,sans-serif;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
-.track-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;margin-bottom:7px}
-.controls{display:flex;align-items:center;justify-content:space-between;gap:5px}
-.controls button{flex:0 0 40px;height:40px;border:1px solid #ffffff66;border-radius:50%;background:#ffffff18;color:white;font-size:18px;cursor:pointer}
-.controls input{min-width:0;width:100%;accent-color:white}
-.track-picker{width:100%;margin-top:7px;border-radius:7px;padding:6px;background:#26302d;color:white;border:1px solid #ffffff55}
+.player{position:absolute;z-index:6;bottom:2%;left:3%;right:3%;padding:11px 12px;border-radius:17px;background:rgba(12,20,22,.76);color:white;font:13px -apple-system,BlinkMacSystemFont,Arial,sans-serif;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.track-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;font-size:14px;font-weight:650;margin-bottom:5px}
+.controls{display:flex;align-items:center;justify-content:center;gap:clamp(6px,3vw,14px)}
+.controls button{flex:0 0 42px;height:42px;border:1px solid #ffffff66;border-radius:50%;background:#ffffff18;color:white;font-size:18px;cursor:pointer}
+.controls #playPause{flex-basis:48px;height:48px;background:rgba(255,255,255,.26);font-size:22px}
+.progress-row{display:flex;align-items:center;gap:8px;margin:8px 0 5px;font-size:11px;font-variant-numeric:tabular-nums;color:#f0f0f0}
+.progress-row span{min-width:34px;text-align:center}
+.progress-row input{flex:1;min-width:0;width:100%;accent-color:#f0f0f0;cursor:pointer}
+.progress-row input:disabled{opacity:.5}
+.picker-wrap{position:relative;margin-top:8px}
+.picker-wrap:after{content:"⌄";position:absolute;right:12px;top:50%;transform:translateY(-57%);font-size:21px;font-weight:700;color:white;pointer-events:none}
+.picker-caption{font-size:10px;color:#ffffffb8;margin-bottom:3px;text-align:left}
+@media(max-width:350px){.player{padding:8px}.controls{gap:6px}}
+.track-picker{appearance:none;-webkit-appearance:none;width:100%;border-radius:9px;padding:10px 34px 10px 11px;background:#ffffff21;color:white;border:1px solid #ffffff66;font-weight:600;font-size:13px;cursor:pointer;text-overflow:ellipsis}.track-picker option{background:#26302d;color:white}
 .player button:focus-visible,.track-picker:focus-visible{outline:2px solid white;outline-offset:2px}
 </style>
 </head>
@@ -34,9 +42,9 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#172014}
 <button id="playPause" type="button" aria-label="Abspielen" title="Abspielen">▶</button>
 <button id="next" type="button" aria-label="Nächster Titel" title="Nächster Titel">⏭</button>
 <button id="muteToggle" type="button" aria-label="Stumm schalten" title="Stumm schalten">🔊</button>
-<input id="volume" type="range" min="0" max="100" value="75" aria-label="Lautstärke">
 </div>
-<select id="trackPicker" class="track-picker" aria-label="Titel auswählen"><option>Musik wird gesucht …</option></select>
+<div class="progress-row"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="Wiedergabeposition" disabled><span id="duration">–:––</span></div>
+<div class="picker-wrap"><div class="picker-caption">TITEL AUSWÄHLEN</div><select id="trackPicker" class="track-picker" aria-label="Titel auswählen – Liste öffnen"><option>Musik wird gesucht …</option></select></div>
 </section>
 </main>
 <script>
@@ -48,22 +56,31 @@ const audio=$("music"),play=$("playPause"),mute=$("muteToggle"),picker=$("trackP
 const owner=location.hostname.split(".")[0],repo=location.pathname.split("/").filter(Boolean)[0];
 const apiRoot=`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 let tracks=[],current=-1,loading=null;
-audio.volume=.75;
+
 async function getJson(url){
  const r=await fetch(url+(url.includes("?")?"&":"?")+"_="+Date.now(),{cache:"no-store",headers:{Accept:"application/vnd.github+json"}});
  if(!r.ok)throw Error("GitHub-Antwort: "+r.status);return r.json()
 }
+function clock(s){if(!Number.isFinite(s)||s<0)return "–:––";s=Math.floor(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+function renderProgress(){
+ const valid=Number.isFinite(audio.duration)&&audio.duration>0;
+ $("elapsed").textContent=clock(audio.currentTime||0);
+ $("duration").textContent=valid?clock(audio.duration):"–:––";
+ $("seek").disabled=!valid;
+ if(!seeking)$("seek").value=valid?Math.round(audio.currentTime/audio.duration*1000):0;
+}
+let seeking=false;
 function render(){
  play.textContent=audio.paused?"▶":"⏸";
  mute.textContent=audio.muted||audio.volume===0?"🔇":"🔊";
  play.setAttribute("aria-label",audio.paused?"Abspielen":"Pausieren");
  title.textContent=current<0?"Keine MP3 gefunden":tracks[current].name.replace(/\.mp3$/i,"");
- picker.value=String(current)
+ picker.value=String(current);renderProgress()
 }
 function setTrack(i,autoplay=false){
  if(!tracks.length)return;
  current=(i+tracks.length)%tracks.length;
- audio.src=tracks[current].url;audio.load();render();
+ audio.src=tracks[current].url;audio.load();renderProgress();render();
  if(autoplay)audio.play().catch(e=>console.warn("Audiostart:",e))
 }
 async function findTracks(){
@@ -101,7 +118,14 @@ $("previous").addEventListener("click",async()=>{if(!tracks.length&&!(await load
 $("next").addEventListener("click",async()=>{if(!tracks.length&&!(await loadTracks()))return;setTrack(current+1,true)});
 picker.addEventListener("change",()=>setTrack(Number(picker.value),true));
 mute.addEventListener("click",()=>{audio.muted=!audio.muted;render()});
-$("volume").addEventListener("input",e=>{audio.volume=Number(e.target.value)/100;audio.muted=false;render()});
+const seek=$("seek");
+seek.addEventListener("pointerdown",()=>{seeking=true});
+seek.addEventListener("pointerup",()=>{seeking=false;renderProgress()});
+seek.addEventListener("change",()=>{seeking=false;renderProgress()});
+seek.addEventListener("input",e=>{
+ if(Number.isFinite(audio.duration)&&audio.duration>0){audio.currentTime=audio.duration*Number(e.target.value)/1000;$("elapsed").textContent=clock(audio.currentTime)}
+});
+["timeupdate","loadedmetadata","durationchange","seeking","seeked"].forEach(e=>audio.addEventListener(e,renderProgress));
 ["play","pause","ended","volumechange"].forEach(e=>audio.addEventListener(e,render));
 loadTracks().then(ok=>{if(ok)audio.play().catch(()=>render())});
 (async()=>{
