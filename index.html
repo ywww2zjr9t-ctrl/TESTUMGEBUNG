@@ -25,7 +25,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#172014}
 .picker-wrap:after{content:"⌄";position:absolute;right:12px;top:50%;transform:translateY(-57%);font-size:21px;font-weight:700;color:white;pointer-events:none}
 .picker-caption{font-size:10px;color:#ffffffb8;margin-bottom:3px;text-align:left}
 @media(max-width:350px){.player{padding:8px}.controls{gap:6px}}
-.track-picker{appearance:none;-webkit-appearance:none;width:100%;border-radius:9px;padding:10px 34px 10px 11px;background:#ffffff21;color:white;border:1px solid #ffffff66;font-weight:600;font-size:13px;cursor:pointer;text-overflow:ellipsis}.track-picker option{background:#26302d;color:white}
+.track-picker{appearance:none;-webkit-appearance:none;width:100%;border-radius:9px;padding:10px 34px 10px 11px;background:#ffffff21;color:white;border:1px solid #ffffff66;font-weight:600;font-size:13px;cursor:pointer;text-overflow:ellipsis}.track-picker option{background:#26302d;color:white}.track-picker optgroup{background:#172622;color:#b7dbcd;font-weight:700}.radio-note{font-size:10px;text-align:center;color:#e5e5e5;margin:4px 0 0}.radio-note[hidden]{display:none}.radio-link{color:#fff;text-decoration:underline;text-underline-offset:2px}.progress-row.radio-live{justify-content:center;color:#ffb5a4;font-weight:750;letter-spacing:.12em}.progress-row.radio-live:before{content:attr(data-live)}.progress-row.radio-live #seek,.progress-row.radio-live #elapsed,.progress-row.radio-live #duration{display:none}
 .player button:focus-visible,.track-picker:focus-visible{outline:2px solid white;outline-offset:2px}
 
 /* Ruhige iOS-inspirierte Symbole statt Emoji; Countdown und Bild bleiben unverändert. */
@@ -56,7 +56,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#172014}
 <button id="muteToggle" type="button" aria-label="Stumm schalten" title="Stumm schalten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5zM15 9a5 5 0 0 1 0 6M18 6a9 9 0 0 1 0 12"/></svg></button>
 </div>
 <div class="progress-row"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="Wiedergabeposition" disabled><span id="duration">–:––</span></div>
-<div class="picker-wrap"><div class="picker-caption">TITEL AUSWÄHLEN</div><select id="trackPicker" class="track-picker" aria-label="Titel auswählen – Liste öffnen"><option>Musik wird gesucht …</option></select></div>
+<div class="picker-wrap"><div class="picker-caption">MUSIK ODER RADIO AUSWÄHLEN</div><select id="trackPicker" class="track-picker" aria-label="Titel auswählen – Liste öffnen"><option>Musik wird gesucht …</option></select></div><div class="radio-note" id="radioNote" hidden>Sender wird im offiziellen Player geöffnet · <a class="radio-link" id="radioLink" href="https://piccadillyradio261.co.uk/listen.html" target="_blank" rel="noopener noreferrer">Radio öffnen ↗</a></div>
 </section>
 <button id="showPlayer" class="show-player" type="button" aria-label="Musiksteuerung einblenden" title="Musiksteuerung einblenden" hidden>♫ <span>Musik</span> <span aria-hidden="true">⌃</span></button>
 </main>
@@ -68,7 +68,28 @@ const $=id=>document.getElementById(id);
 const audio=$("music"),play=$("playPause"),mute=$("muteToggle"),picker=$("trackPicker"),title=$("trackTitle");
 const owner=location.hostname.split(".")[0],repo=location.pathname.split("/").filter(Boolean)[0];
 const apiRoot=`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-let tracks=[],current=-1,loading=null;
+const radioStations=[
+ {name:"Piccadilly 261",ch:"flagship"},
+ {name:"Piccadilly Heritage",ch:"heritage"},
+ {name:"Piccadilly 80s",ch:"80s"},
+ {name:"Piccadilly 90s",ch:"90s"},
+ {name:"Piccadilly Gold",ch:"gold"},
+ {name:"Piccadilly 103",ch:"103"}
+].map(s=>({...s,url:"https://piccadillyradio261.co.uk/listen.html?ch="+encodeURIComponent(s.ch)}));
+let tracks=[],current=-1,loading=null,selectedRadio=-1;
+function radioMode(){return selectedRadio>=0}
+function openRadio(){if(!radioMode())return;window.open(radioStations[selectedRadio].url,"_blank","noopener,noreferrer")}
+function chooseRadio(i,open=true){
+ selectedRadio=(i+radioStations.length)%radioStations.length;
+ audio.pause();audio.removeAttribute("src");audio.load();
+ const station=radioStations[selectedRadio];
+ $("radioLink").href=station.url;
+ $("radioNote").hidden=false;
+ picker.value="radio:"+selectedRadio;
+ render();
+ if(open)openRadio();
+}
+function chooseMp3(i,autoplay=true){selectedRadio=-1;$("radioNote").hidden=true;setTrack(i,autoplay)}
 
 async function getJson(url){
  const r=await fetch(url+(url.includes("?")?"&":"?")+"_="+Date.now(),{cache:"no-store",headers:{Accept:"application/vnd.github+json"}});
@@ -76,19 +97,21 @@ async function getJson(url){
 }
 function clock(s){if(!Number.isFinite(s)||s<0)return "–:––";s=Math.floor(s);return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
 function renderProgress(){
- const valid=Number.isFinite(audio.duration)&&audio.duration>0;
+ const valid=!radioMode()&&Number.isFinite(audio.duration)&&audio.duration>0;
  $("elapsed").textContent=clock(audio.currentTime||0);
  $("duration").textContent=valid?clock(audio.duration):"–:––";
  $("seek").disabled=!valid;
  if(!seeking)$("seek").value=valid?Math.round(audio.currentTime/audio.duration*1000):0;
+ $("seek").closest(".progress-row").classList.toggle("radio-live",radioMode());
+ $("seek").closest(".progress-row").setAttribute("data-live",radioMode()?"🔴 LIVE – im Sender-Player":"");
 }
 let seeking=false;
 function render(){
- play.innerHTML=audio.paused?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>';
+ play.innerHTML=(radioMode()||audio.paused)?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>';
  mute.innerHTML=audio.muted||audio.volume===0?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5zM16 9l5 6m0-6-5 6"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5zM15 9a5 5 0 0 1 0 6M18 6a9 9 0 0 1 0 12"/></svg>';
- play.setAttribute("aria-label",audio.paused?"Abspielen":"Pausieren");
- title.textContent=current<0?"Keine MP3 gefunden":tracks[current].name.replace(/\.mp3$/i,"");
- picker.value=String(current);renderProgress()
+ play.setAttribute("aria-label",radioMode()?"Offiziellen Radioplayer öffnen":(audio.paused?"Abspielen":"Pausieren"));
+ title.textContent=radioMode()?"📻 "+radioStations[selectedRadio].name:(current<0?"Keine MP3 gefunden":tracks[current].name.replace(/\.mp3$/i,""));
+ picker.value=radioMode()?"radio:"+selectedRadio:String(current);renderProgress()
 }
 function setTrack(i,autoplay=false){
  if(!tracks.length)return;
@@ -109,27 +132,42 @@ async function findTracks(){
  }
  return entries.sort((a,b)=>a.name.localeCompare(b.name,"de"))
 }
+function fillPicker(){
+ picker.innerHTML="";
+ const mp3Group=document.createElement("optgroup");mp3Group.label="🎵 Eigene Musik";
+ if(!tracks.length)mp3Group.appendChild(new Option("Keine MP3 gefunden","-1"));
+ tracks.forEach((t,i)=>mp3Group.appendChild(new Option(t.name.replace(/\.mp3$/i,""),String(i))));
+ picker.appendChild(mp3Group);
+ const radioGroup=document.createElement("optgroup");radioGroup.label="📻 Piccadilly Radio – externer Player";
+ radioStations.forEach((s,i)=>radioGroup.appendChild(new Option(s.name,"radio:"+i)));
+ picker.appendChild(radioGroup);
+}
+fillPicker();
 async function loadTracks(){
  if(loading)return loading;
  loading=(async()=>{
   try{
-   tracks=await findTracks();picker.innerHTML="";
-   if(!tracks.length){picker.add(new Option("Keine MP3 gefunden","-1"));render();return false}
-   tracks.forEach((t,i)=>picker.add(new Option(t.name.replace(/\.mp3$/i,""),String(i))));
+   tracks=await findTracks();fillPicker();
+   if(!tracks.length){title.textContent="Radio auswählen oder MP3 hinzufügen";return false}
    setTrack(Math.floor(Math.random()*tracks.length));return true
-  }catch(e){console.warn("MP3-Suche:",e);title.textContent="Musik nicht gefunden – ▶ erneut versuchen";return false}
+  }catch(e){console.warn("MP3-Suche:",e);fillPicker();title.textContent="Radio auswählen oder MP3-Suche erneut versuchen";return false}
   finally{loading=null}
  })();
  return loading
 }
 play.addEventListener("click",async()=>{
+ if(radioMode()){openRadio();return}
  if(!tracks.length){if(!await loadTracks())return}
  if(audio.paused){try{await audio.play()}catch(e){console.warn("Audiostart:",e)}}
  else audio.pause();render()
 });
-$("previous").addEventListener("click",async()=>{if(!tracks.length&&!(await loadTracks()))return;setTrack(current-1,true)});
-$("next").addEventListener("click",async()=>{if(!tracks.length&&!(await loadTracks()))return;setTrack(current+1,true)});
-picker.addEventListener("change",()=>setTrack(Number(picker.value),true));
+$("previous").addEventListener("click",async()=>{if(radioMode()){chooseRadio(selectedRadio-1);return}if(!tracks.length&&!(await loadTracks()))return;chooseMp3(current-1,true)});
+$("next").addEventListener("click",async()=>{if(radioMode()){chooseRadio(selectedRadio+1);return}if(!tracks.length&&!(await loadTracks()))return;chooseMp3(current+1,true)});
+picker.addEventListener("change",()=>{
+ const v=picker.value;
+ if(v.startsWith("radio:"))chooseRadio(Number(v.slice(6)));
+ else if(Number(v)>=0&&tracks.length)chooseMp3(Number(v),true);
+});
 mute.addEventListener("click",()=>{audio.muted=!audio.muted;render()});
 const seek=$("seek");
 seek.addEventListener("pointerdown",()=>{seeking=true});
@@ -161,7 +199,7 @@ player.addEventListener("focusin",()=>clearTimeout(hideTimer));
 player.addEventListener("focusout",scheduleHide);
 scheduleHide();
 
-loadTracks().then(ok=>{if(ok)audio.play().catch(()=>render())});
+loadTracks().then(ok=>{if(ok&&!radioMode())audio.play().catch(()=>render())});
 (async()=>{
  try{
   const files=await getJson(apiRoot+"/contents");
